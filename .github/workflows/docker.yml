@@ -1,0 +1,92 @@
+# Builds the container image and publishes it to GitHub's registry (private, like the repo):
+#   ghcr.io/julian314/fg-actuarial-science-discord-bot:latest
+# TrueNAS pulls it from there (see docs/deployment.md, Option C).
+#
+# Needs the repository secret SCRAPER_REPO_TOKEN: a fine-grained token with read-only
+# "Contents" access to Julian314/swiss-actuarial-job-scraper (that repository is private too).
+#
+# Runs on every push to main. Run it by hand (Actions -> Docker image -> Run workflow) after a
+# change that is only in the scraper repository.
+
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-image
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/julian314/fg-actuarial-science-discord-bot
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # The image needs both repositories side by side, like on a developer machine.
+      - name: Check out the bot
+        uses: actions/checkout@v5
+        with:
+          path: fg-actuarial-science-discord-bot
+
+      - name: Check out the job scraper
+        uses: actions/checkout@v5
+        with:
+          repository: Julian314/swiss-actuarial-job-scraper
+          ref: main
+          token: ${{ secrets.SCRAPER_REPO_TOKEN }}
+          path: swiss-actuarial-job-scraper
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: fg-actuarial-science-discord-bot/deploy/docker/Dockerfile
+          load: true
+          tags: fgbot:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Run as TrueNAS's apps user (568), like the real deployment.
+      - name: Smoke test
+        run: |
+          set -eu
+          run() { docker run --rm --user 568:568 --tmpfs /state:uid=568,gid=568 "$@"; }
+          run --entrypoint python fgbot:test -c \
+            "import fgbot.bot, actjobs.service, torch, cairosvg, chess, yt_dlp; print('imports ok')"
+          run --entrypoint sh fgbot:test -c \
+            'echo quit | stockfish && ffmpeg -version | head -1 && deno --version | head -1'
+          # Without DISCORD_TOKEN the bot must stop with "Invalid configuration" (exit code 2).
+          # This also runs the entry point, which creates the folders on /state.
+          set +e
+          output=$(run fgbot:test 2>&1); status=$?
+          set -e
+          echo "$output"
+          [ "$status" -eq 2 ] && echo "$output" | grep -q "Invalid configuration"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: fg-actuarial-science-discord-bot/deploy/docker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          cache-from: type=gha

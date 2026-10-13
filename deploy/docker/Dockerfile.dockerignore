@@ -1,0 +1,22 @@
+# Build context is the parent folder of both repositories (see Dockerfile), so the patterns
+# carry the repository folder. Keeps secrets, local state and caches out of the image.
+# Later rules win: first allow only the two repositories, then exclude inside them.
+*
+!fg-actuarial-science-discord-bot
+!swiss-actuarial-job-scraper
+
+**/.git
+**/.github
+**/.env
+**/.envrc
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/*.log
+fg-actuarial-science-discord-bot/logs
+swiss-actuarial-job-scraper/data
+swiss-actuarial-job-scraper/reports
+swiss-actuarial-job-scraper/logs
+swiss-actuarial-job-scraper/exports

@@ -1,0 +1,31 @@
+# systemd USER service: runs the bot as your own user, e.g. on your desktop/laptop.
+#
+# Install (see docs/deployment.md):
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/systemd/fgbot.user.service ~/.config/systemd/user/fgbot.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now fgbot
+#   loginctl enable-linger "$USER"     # keep it running when you are logged out
+#
+# Logs: journalctl --user -u fgbot -f
+# %h is your home directory. Adjust the paths if the repository lives elsewhere.
+
+[Unit]
+Description=FG Actuarial Science Discord bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/fg-actuarial-science-discord-bot
+ExecStart=%h/Projects/fg-actuarial-science-discord-bot/.venv/bin/fgbot
+# ffmpeg, deno (YouTube) and stockfish must be on this PATH.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=15
+# Exit code 2 = invalid configuration: restarting would not help.
+RestartPreventExitStatus=2
+
+[Install]
+WantedBy=default.target
