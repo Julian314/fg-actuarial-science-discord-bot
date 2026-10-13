@@ -1,0 +1,40 @@
+# systemd SYSTEM service: for a server, running the bot as a dedicated, unprivileged user.
+#
+# Assumes both repositories are cloned to /opt/fgbot (see docs/deployment.md):
+#   /opt/fgbot/fg-actuarial-science-discord-bot
+#   /opt/fgbot/swiss-actuarial-job-scraper
+#
+# Install:
+#   sudo cp deploy/systemd/fgbot.system.service /etc/systemd/system/fgbot.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fgbot
+#
+# Logs: journalctl -u fgbot -f
+
+[Unit]
+Description=FG Actuarial Science Discord bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=fgbot
+Group=fgbot
+WorkingDirectory=/opt/fgbot/fg-actuarial-science-discord-bot
+ExecStart=/opt/fgbot/fg-actuarial-science-discord-bot/.venv/bin/fgbot
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/games
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=15
+# Exit code 2 = invalid configuration: restarting would not help.
+RestartPreventExitStatus=2
+
+# Hardening: the bot only needs to write to its own and the scraper's folders.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/fgbot
+
+[Install]
+WantedBy=multi-user.target
