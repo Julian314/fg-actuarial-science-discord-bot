@@ -85,6 +85,8 @@ src/fgbot/
 tests/                 pytest suite (runs offline, no Discord connection needed)
 docs/                  documentation
 deploy/systemd/        service files for running the bot permanently
+deploy/docker/         container image (built by .github/workflows/docker.yml)
+deploy/truenas/        TrueNAS Custom App template
 ```
 
 ## Development in one minute

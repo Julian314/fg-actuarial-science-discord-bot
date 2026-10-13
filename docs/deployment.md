@@ -1,12 +1,13 @@
 # Deployment
 
-The bot is a single long-running process (`fgbot`). Both setups below use **systemd**, which
-starts the bot at boot, restarts it after a crash, and collects its logs.
+The bot is a single long-running process (`fgbot`). Options A and B use **systemd**, which
+starts the bot at boot, restarts it after a crash, and collects its logs. Option C runs it as a
+Docker container on a TrueNAS NAS.
 
 > **Run only one instance per bot token.** If the bot runs on your laptop *and* on the server,
 > both answer every command and both post the job report. Stop the old one when you move.
 
-## Requirements (both setups)
+## Requirements (options A and B)
 
 | What | Why |
 |---|---|
@@ -122,6 +123,78 @@ journalctl -u fgbot -f
 
 The unit uses systemd's sandboxing: the bot can only write inside `/opt/fgbot`.
 
+## Option C: TrueNAS (Docker Custom App)
+
+TrueNAS Community Edition (24.10 and newer) runs apps as Docker containers. GitHub Actions
+builds the bot's image on every push to `main` ([`.github/workflows/docker.yml`](../.github/workflows/docker.yml))
+and publishes it as a private package to `ghcr.io/julian314/fg-actuarial-science-discord-bot`.
+TrueNAS pulls it from there. Nothing needs to be installed on the NAS or on your own machine,
+and SSH can stay off.
+
+The image ([`deploy/docker/Dockerfile`](../deploy/docker/Dockerfile)) contains both
+repositories, ffmpeg, deno and Stockfish. The bot runs as TrueNAS's `apps` user (uid 568). All
+state lives on one dataset, which is mounted at `/state` in the container:
+
+| On the dataset | What |
+|---|---|
+| `logs/` | the bot's log files |
+| `actjobs/data/jobs.db` | the job database (see [Backups](#backups)) |
+| `actjobs/reports/`, `actjobs/logs/` | the scraper's daily Markdown reports and log files |
+
+Settings are environment variables in the app's YAML, with the same names as in `.env.example`.
+
+### 1. GitHub (once)
+
+1. **Token for the build.** The scraper repository is private, so the workflow needs a token
+   to read it. On GitHub: **Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token**. Repository access: only
+   `swiss-actuarial-job-scraper`. Permissions: **Contents: Read-only**. Then store it in the
+   bot repository:
+   ```bash
+   gh secret set SCRAPER_REPO_TOKEN --repo Julian314/fg-actuarial-science-discord-bot
+   ```
+2. **Token for TrueNAS.** The registry doesn't accept fine-grained tokens. Create a
+   **classic** token instead (**Tokens (classic) → Generate new token**) with only the
+   **`read:packages`** scope.
+3. Push to `main`, or start the workflow by hand: **Actions → Docker image → Run workflow**.
+   Wait for the green check. The package then appears on your GitHub profile under **Packages**.
+
+Write both tokens' expiry dates into the maintenance calendar ([handover.md](handover.md)).
+When one expires, the build or the update fails.
+
+### 2. TrueNAS web UI (once)
+
+1. **Apps:** on first use, TrueNAS asks for a pool for apps (**Apps → Configuration →
+   Choose Pool**).
+2. **Datasets:** select your pool, then **Add Dataset**. Name: `fgbot`, Dataset Preset:
+   **Apps**. Save it, then **Permissions → Edit**: set owner user and group to `apps`, tick
+   *Apply recursively*, and save.
+3. **Registry login:** **Apps → Configuration → Manage Container Image Registries → Add**.
+   URI `https://ghcr.io`, username: your GitHub user name, password: the `read:packages` token.
+4. **App:** **Apps → Discover Apps → Custom App → Install via YAML** (the ⋮ menu or the button
+   next to *Custom App*, depending on the version). Name: `fgbot`. Paste
+   [`deploy/truenas/fgbot.yaml`](../deploy/truenas/fgbot.yaml), replace `<POOL>`, fill in
+   `DISCORD_TOKEN`, `GUILD_ID`, `JOBS_CHANNEL_ID` and so on, and save.
+5. **Check:** **Apps → Installed → fgbot**. The app should show *Running*. Under
+   **Workloads**, the container's logs icon shows the bot's output; look for the login and the
+   command sync. Then try `/ping`, `/about` and `/jobs status` in Discord.
+6. **Backups:** **Data Protection → Periodic Snapshot Tasks → Add**. Dataset `fgbot`, daily,
+   keep for 4 weeks.
+
+Stop any other running copy of the bot first (one instance per token).
+
+### Everyday tasks
+
+| Task | How |
+|---|---|
+| Read the log | Apps → Installed → fgbot → Workloads → logs icon. Older logs: `logs/` on the dataset. |
+| Change a setting | Apps → Installed → fgbot → **Edit**, change the variable, **Save**. The app restarts. |
+| Restart | Apps → Installed → fgbot → **Stop**, then **Start**. |
+| Deploy an update | Wait for the green build on GitHub, then **Edit → Save** (or Stop/Start). `pull_policy: always` makes the app pull the newest image every time it starts. |
+
+If the app keeps restarting, the log usually starts with `Invalid configuration`, which means
+a variable in the YAML is wrong.
+
 ## Updating
 
 ```bash
@@ -132,13 +205,18 @@ uv sync --frozen
 systemctl --user restart fgbot          # server: sudo systemctl restart fgbot
 ```
 
+**TrueNAS (option C):** push to `main` and let GitHub build the image. Then
+**Apps → Installed → fgbot → Edit → Save** in TrueNAS. After a change that is only in the scraper
+repository, start the build by hand (**Actions → Docker image → Run workflow**).
+
 If `/play` starts failing, update yt-dlp (see [music.md](music.md#keeping-yt-dlp-up-to-date-important)):
 
 ```bash
 uv lock --upgrade-package yt-dlp --upgrade-package yt-dlp-ejs && uv sync
 ```
 
-Commit the updated `uv.lock` so the server gets the same versions.
+Commit the updated `uv.lock` so the server gets the same versions. On TrueNAS, the next image
+build picks them up.
 
 ## Backups
 
@@ -150,5 +228,7 @@ the "already posted" records. Chess games and music queues live in memory only.
 sqlite3 /opt/fgbot/swiss-actuarial-job-scraper/data/jobs.db ".backup '/var/backups/jobs-$(date +%F).db'"
 ```
 
-Put this in a daily cron job or systemd timer if you like. `.env` should also be kept somewhere
+Put this in a daily cron job or systemd timer if you like. On TrueNAS, the daily snapshot of
+the `fgbot` dataset ([option C](#2-truenas-web-ui-once)) is the backup. To restore, roll the
+dataset back under **Datasets → fgbot → Snapshots**, with the app stopped. `.env` should also be kept somewhere
 safe, such as a password manager, rather than in git.

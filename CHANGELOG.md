@@ -12,6 +12,9 @@ All notable changes to this bot are recorded here. The format follows
 - [Architecture](docs/architecture.md): a slash command traced end to end, the startup and
   shutdown order, where state lives, and the import rules.
 - [Job reports](docs/job-reports.md): the scraper API contract.
+- **TrueNAS deployment** ([deployment.md](docs/deployment.md), option C): a container image
+  that GitHub Actions builds and publishes to the GitHub Container Registry, and a TrueNAS
+  Custom App template.
 
 ## [1.0.0] – 2026-10-13
 

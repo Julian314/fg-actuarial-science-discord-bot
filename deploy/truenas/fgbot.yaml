@@ -1,0 +1,47 @@
+# TrueNAS Custom App for fgbot (Apps -> Discover Apps -> Custom App -> Install via YAML).
+# Step-by-step guide: docs/deployment.md, "Option C: TrueNAS".
+#
+# Before pasting:
+#   - replace <POOL> with the name of your pool (Storage page)
+#   - fill in the values below. They mean the same as in .env.example; see docs/configuration.md.
+#     Empty values ("") use the default.
+# LOG_DIR, ACTJOBS_CONFIG and STOCKFISH_PATH are set by the image. Don't add them here.
+
+services:
+  fgbot:
+    image: ghcr.io/julian314/fg-actuarial-science-discord-bot:latest
+    # Pull the newest image every time the app (re)starts: that is how updates arrive.
+    pull_policy: always
+    restart: unless-stopped
+    # Pass `docker stop` on to the bot, so it shuts down cleanly.
+    init: true
+    # TrueNAS's built-in "apps" user. The dataset below must belong to it.
+    user: "568:568"
+    mem_limit: 1536m
+    environment:
+      # ---- Core
+      DISCORD_TOKEN: ""
+      GUILD_ID: ""
+      LOG_LEVEL: "INFO"
+      TZ: "Europe/Zurich"
+      # ---- Features
+      MUSIC_ENABLED: "true"
+      CHESS_ENABLED: "true"
+      JOBS_ENABLED: "true"
+      # ---- Music
+      SPOTIFY_CLIENT_ID: ""
+      SPOTIFY_CLIENT_SECRET: ""
+      MUSIC_IDLE_TIMEOUT: "300"
+      MUSIC_DEFAULT_VOLUME: "50"
+      # ---- Chess
+      STOCKFISH_THINK_TIME: "0.5"
+      # ---- Daily job report
+      JOBS_CHANNEL_ID: ""
+      JOBS_TIME: "07:00"
+      JOBS_TIMEZONE: "Europe/Zurich"
+      JOBS_MAX_AGE_DAYS: "7"
+      JOBS_POST_WHEN_EMPTY: "true"
+      JOBS_ATTACH_REPORT: "true"
+    volumes:
+      # Logs, the job database and the daily reports (see deploy/docker/Dockerfile).
+      - /mnt/<POOL>/fgbot:/state
